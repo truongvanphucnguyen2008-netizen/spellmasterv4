@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic IO Clone - Spell Master (Audio Engine V2.1)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #0f172a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        canvas { display: block; cursor: crosshair; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .stats { position: absolute; top: 25px; left: 20px; color: white; pointer-events: auto; }
+        
+        .bar-bg { position: relative; width: 220px; height: 20px; background: #334155; border-radius: 10px; overflow: hidden; margin-top: 8px; border: 1px solid #475569; }
+        .bar-fill { height: 100%; transition: width 0.3s; }
+        .hp-fill { background: linear-gradient(90deg, #ef4444, #f87171); }
+        .mana-fill { background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 0.1s; }
+        .bar-text { position: absolute; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 1px 1px 2px black; pointer-events: none; }
+        
+        .xp-bar-bg { width: 100%; height: 18px; background: #1e293b; position: fixed; top: 0; left: 0; z-index: 100; border-bottom: 1px solid #475569; }
+        .xp-bar-fill { width: 0%; height: 100%; background: #a855f7; transition: width 0.2s; box-shadow: 0 0 10px #a855f7; display: flex; align-items: center; justify-content: center; }
+        .xp-pct-label { position: absolute; width: 100%; text-align: center; color: white; font-size: 10px; font-weight: bold; text-shadow: 1px 1px 2px black; line-height: 18px; pointer-events: none; }
+
+        #boss-ui { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); width: 60%; display: none; text-align: center; }
+        .boss-hp-bg { width: 100%; height: 20px; background: #450a0a; border: 2px solid #dc2626; border-radius: 10px; overflow: hidden; position: relative; }
+        .boss-hp-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #dc2626, #f87171); transition: width 0.1s; }
+
+        .skill-container { 
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); 
+            display: flex; gap: 15px; pointer-events: auto;
+        }
+        .skill-slot { 
+            width: 60px; height: 60px; background: rgba(30, 41, 59, 0.8); 
+            border: 2px solid #475569; border-radius: 12px; position: relative;
+            display: flex; align-items: center; justify-content: center; color: white; 
+        }
+        .skill-slot.active { border-color: #a855f7; box-shadow: 0 0 15px rgba(168, 85, 247, 0.4); }
+        .cooldown-overlay { 
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 0%; 
+            background: rgba(0, 0, 0, 0.6); transition: height 0.1s linear; border-radius: 0 0 10px 10px;
+        }
+        
+        .key-bind { position: absolute; top: 2px; left: 5px; font-size: 10px; font-weight: bold; color: #cbd5e1; opacity: 0.9; text-transform: uppercase; }
+
+        #level-up-modal, #pause-modal, #victory-modal, #intro-modal { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            background: rgba(15, 23, 42, 0.98); border: 2px solid #a855f7; padding: 2rem; 
+            border-radius: 1rem; display: none; pointer-events: auto; text-align: center; color: white;
+            min-width: 350px; max-width: 500px; box-shadow: 0 0 50px rgba(0,0,0,0.5); z-index: 1000;
+        }
+        .skill-btn, .menu-btn { 
+            background: #1e293b; border: 1px solid #334155; padding: 1rem; margin: 0.5rem; 
+            border-radius: 0.5rem; cursor: pointer; transition: all 0.2s; width: 100%; text-align: center;
+        }
+        .skill-btn:hover, .menu-btn:hover { background: #334155; border-color: #a855f7; transform: scale(1.02); }
+
+        .stage-info { position: absolute; top: 30px; right: 20px; color: #cbd5e1; text-align: right; pointer-events: auto; }
+        
+        #pickup-notice {
+            position: absolute; top: 25%; left: 50%; transform: translateX(-50%);
+            background: rgba(234, 179, 8, 0.2); color: #eab308; padding: 8px 16px; border-radius: 8px;
+            border: 1px solid #eab308; font-weight: bold; display: none; animation: fadeUp 1.5s forwards; pointer-events: none;
+        }
+
+        .guide-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: left; margin-top: 15px; }
+        .guide-item { background: rgba(30, 41, 59, 0.5); padding: 10px; border-radius: 8px; border: 1px solid #334155; }
+        .kbd { background: #475569; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-weight: bold; color: #fff; }
+
+        @keyframes fadeUp {
+            0% { opacity: 0; transform: translate(-50%, 0); }
+            20% { opacity: 1; }
+            80% { opacity: 1; }
+            100% { opacity: 0; transform: translate(-50%, -50px); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="xp-bar" class="xp-bar-bg">
+        <div id="xp-fill" class="xp-bar-fill"></div>
+        <div id="xp-pct-label" class="xp-pct-label">0%</div>
+    </div>
+
+    <div id="ui-layer">
+        <!-- Hướng dẫn đầu game -->
+        <div id="intro-modal" style="display: block;">
+            <h2 class="text-3xl font-black mb-2 text-purple-400">SPELL MASTER</h2>
+            <p class="text-slate-400 text-sm mb-4 italic">Hệ thống âm thanh V2.1 đã sẵn sàng!</p>
+            
+            <div class="guide-grid">
+                <div class="guide-item col-span-2">
+                    <p class="text-purple-300 font-bold mb-1">🎮 Di chuyển:</p>
+                    <p class="text-sm">Sử dụng <span class="kbd">W</span> <span class="kbd">A</span> <span class="kbd">S</span> <span class="kbd">D</span> để di chuyển.</p>
+                </div>
+                <div class="guide-item">
+                    <p class="text-blue-300 font-bold mb-1">🪄 Kỹ năng:</p>
+                    <ul class="text-xs space-y-1">
+                        <li><span class="kbd">Q</span> : Cầu Lửa</li>
+                        <li><span class="kbd">E</span> : Hộ Pháp</li>
+                        <li><span class="kbd">Shift</span> : Tốc Biến</li>
+                    </ul>
+                </div>
+                <div class="guide-item">
+                    <p class="text-amber-300 font-bold mb-1">🔊 Âm thanh:</p>
+                    <p class="text-[10px] leading-relaxed">Nhấp nút dưới để kích hoạt Engine Audio V2.1 trước khi vào trận.</p>
+                </div>
+            </div>
+            
+            <button id="start-game-btn" class="menu-btn mt-6 font-bold text-lg bg-purple-600 hover:bg-purple-500 text-white border-none">KÍCH HOẠT & CHIẾN ĐẤU</button>
+        </div>
+
+        <div class="stats">
+            <div class="text-xl font-bold text-purple-400 italic">CẤP ĐỘ <span id="level-val">1</span></div>
+            <div class="bar-bg">
+                <div id="hp-fill" class="bar-fill hp-fill" style="width: 100%"></div>
+                <div class="bar-text">HP: <span id="hp-current-text">125</span> / <span id="hp-max-text">125</span></div>
+            </div>
+            <div class="bar-bg">
+                <div id="mana-fill" class="bar-fill mana-fill" style="width: 100%"></div>
+                <div class="bar-text">MP: <span id="mp-current-text">100</span> / <span id="mp-max-text">100</span></div>
+            </div>
+            <div class="mt-2 text-xs text-slate-400 uppercase tracking-widest">Hạ gục: <span id="kill-count">0</span></div>
+        </div>
+
+        <div class="stage-info">
+            <div class="text-2xl font-black text-amber-500" id="stage-name">STAGE 1</div>
+            <div class="text-sm opacity-80" id="stage-progress">Tiến trình: 0%</div>
+        </div>
+
+        <div id="boss-ui">
+            <div class="text-red-500 font-bold uppercase tracking-tighter mb-1" id="boss-name">BOSS XUẤT HIỆN</div>
+            <div class="boss-hp-bg">
+                <div id="boss-hp-fill" class="boss-hp-fill"></div>
+                <div class="bar-text text-white" id="boss-hp-text">100%</div>
+            </div>
+        </div>
+
+        <div id="pickup-notice">MAX HP INCREASED! ❤️</div>
+
+        <div class="skill-container">
+            <div class="skill-slot active" id="slot-1">
+                <div class="key-bind">Q</div><span class="text-2xl">🔥</span><div id="cd-1" class="cooldown-overlay"></div>
+            </div>
+            <div class="skill-slot active" id="slot-2">
+                <div class="key-bind">E</div><span class="text-2xl" id="icon-2">🛡️</span><div id="cd-2" class="cooldown-overlay"></div>
+            </div>
+            <div class="skill-slot active" id="slot-3">
+                <div class="key-bind">Shift</div><span class="text-2xl" id="icon-3">⚡</span><div id="cd-3" class="cooldown-overlay"></div>
+            </div>
+            <div class="skill-slot active" id="slot-4">
+                <div class="key-bind">R</div><span class="text-2xl">☄️</span><div id="cd-4" class="cooldown-overlay"></div>
+            </div>
+        </div>
+
+        <div id="level-up-modal">
+            <h2 class="text-2xl font-bold mb-4 text-purple-400">CHỌN NÂNG CẤP</h2>
+            <div id="skill-options"></div>
+        </div>
+
+        <div id="victory-modal">
+            <h2 class="text-3xl font-bold mb-4 text-amber-400">CHIẾN THẮNG MÀN CHƠI!</h2>
+            <button id="next-stage-btn" class="menu-btn font-bold text-lg bg-amber-600/20 text-amber-400 border-amber-600/50">SANG MÀN TIẾP THEO</button>
+        </div>
+
+        <div id="pause-modal">
+            <h2 class="text-3xl font-bold mb-4 text-purple-400 tracking-widest">TẠM DỪNG</h2>
+            <button id="resume-btn" class="menu-btn font-bold text-lg bg-purple-600/20">TIẾP TỤC</button>
+            <button id="exit-btn" class="menu-btn text-slate-400">THOÁT</button>
+        </div>
+
+        <div id="game-over" class="hidden absolute inset-0 bg-black/90 flex flex-col items-center justify-center text-white pointer-events-auto">
+            <h1 class="text-6xl font-bold text-red-600 mb-4">THẤT BẠI</h1>
+            <p id="final-stats" class="mb-8 text-xl text-slate-300"></p>
+            <button id="restart-btn" class="px-10 py-4 bg-purple-600 hover:bg-purple-700 rounded-xl font-bold transition-all transform hover:scale-110">CHƠI LẠI</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // ==========================================
+        // PHẦN 1: AUDIO ENGINE V2.1 (TÍCH HỢP)
+        // ==========================================
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            playSoundEffect('ui');
+        }
+
+        function playSoundEffect(type) {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+
+            if (type === 'fireball') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(40, now + 0.3);
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(now + 0.3);
+            } 
+            else if (type === 'shield' || type === 'guardian_hit') {
+                const attackOsc = audioCtx.createOscillator();
+                const attackGain = audioCtx.createGain();
+                attackOsc.type = 'sine';
+                attackOsc.frequency.setValueAtTime(1200, now);
+                attackOsc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+                attackGain.gain.setValueAtTime(0.3, now);
+                attackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                attackOsc.connect(attackGain); attackGain.connect(audioCtx.destination);
+                attackOsc.start(); attackOsc.stop(now + 0.15);
+            }
+            else if (type === 'upgrade') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.6);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(now + 0.8);
+            }
+            else if (type === 'ui') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1200, now);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(now + 0.05);
+            }
+            else if (type === 'teleport') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.exponentialRampToValueAtTime(1600, now + 0.1);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(now + 0.1);
+            }
+            else if (type === 'meteor_impact') {
+                const noise = audioCtx.createBufferSource();
+                const bufferSize = audioCtx.sampleRate * 0.4;
+                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                noise.buffer = buffer;
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(1000, now);
+                filter.frequency.exponentialRampToValueAtTime(20, now + 0.4);
+                const gain = audioCtx.createGain();
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+                noise.start();
+            }
+            // --- ÂM THANH MỚI: Đòn đánh thường trúng mục tiêu ---
+            else if (type === 'hit') {
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.frequency.setValueAtTime(150, now);
+                o.frequency.exponentialRampToValueAtTime(10, now + 0.1);
+                g.gain.setValueAtTime(0.08, now);
+                g.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+                o.connect(g); g.connect(audioCtx.destination);
+                o.start(); o.stop(now + 0.1);
+            }
+            // --- ÂM THANH CẢNH BÁO BOSS ---
+            else if (type === 'boss_warning') {
+                for (let i = 0; i < 3; i++) {
+                    const t = now + (i * 0.5);
+                    const o = audioCtx.createOscillator();
+                    const g = audioCtx.createGain();
+                    o.type = 'sawtooth';
+                    o.frequency.setValueAtTime(50, t);
+                    o.frequency.linearRampToValueAtTime(30, t + 0.4);
+                    g.gain.setValueAtTime(0.35, t);
+                    g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+                    o.connect(g); g.connect(audioCtx.destination);
+                    o.start(t); o.stop(t + 0.4);
+                }
+            }
+        }
+
+        // ==========================================
+        // NHẠC NỀN BOSS (trích từ AudioEngine boss file)
+        // ==========================================
+        let _musicInterval = null;
+        let _windSource = null;
+        let _windGainNode = null;
+
+        function startBossWind(vol) {
+            if (_windSource || !audioCtx) return;
+            const bufferSize = audioCtx.sampleRate * 2;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+            _windSource = audioCtx.createBufferSource();
+            _windSource.buffer = buffer;
+            _windSource.loop = true;
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 500;
+            _windGainNode = audioCtx.createGain();
+            _windGainNode.gain.value = vol;
+            _windSource.connect(filter);
+            filter.connect(_windGainNode);
+            _windGainNode.connect(audioCtx.destination);
+            _windSource.start();
+        }
+
+        function stopBossWind() {
+            if (_windSource) { try { _windSource.stop(); } catch(e) {} _windSource = null; }
+        }
+
+        function startBossMusic(theme) {
+            stopBossMusic();
+            if (!audioCtx) return;
+            let beat = 0;
+            const playNote = (freq, time, dur, type, vol, decay) => {
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.type = type;
+                o.frequency.setValueAtTime(freq, time);
+                g.gain.setValueAtTime(vol, time);
+                g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+                o.connect(g); g.connect(audioCtx.destination);
+                o.start(time); o.stop(time + dur);
+            };
+
+            _musicInterval = setInterval(() => {
+                if (isPaused || isLevelingUp) return;
+                const now = audioCtx.currentTime;
+
+                if (theme === 'FIELD_BOSS') {
+                    // Bass nền
+                    if (beat % 4 === 0) playNote(60, now, 0.4, 'sine', 0.35, 0.4);
+                    const scale = [293.66, 392.00, 440.00, 329.63];
+                    if (beat % 2 === 0) playNote(scale[beat % 4], now, 0.2, 'triangle', 0.08, 0.15);
+                    // Tension bass nhanh
+                    if (beat % 1 === 0) playNote(80, now, 0.1, 'sawtooth', 0.03, 0.08);
+                }
+                else if (theme === 'DESERT_BOSS') {
+                    if (beat === 0) startBossWind(0.08);
+                    if (beat % 4 === 0) playNote(70, now, 0.1, 'sine', 0.4, 0.1);
+                    const scale = [174.61, 185.00, 220.00, 233.08];
+                    playNote(scale[beat % 4], now, 0.3, 'sawtooth', 0.06, 0.3);
+                }
+                else if (theme === 'VOID_BOSS') {
+                    // Rumble sâu
+                    if (beat % 8 === 0) {
+                        playNote(40, now, 2, 'sine', 0.45, 1.8);
+                        playNote(41, now, 2, 'sine', 0.3, 1.8);
+                    }
+                    // Trống chiến
+                    if (beat % 2 === 0) {
+                        const drum = audioCtx.createOscillator();
+                        const drumG = audioCtx.createGain();
+                        drum.frequency.setValueAtTime(100, now);
+                        drum.frequency.exponentialRampToValueAtTime(20, now + 0.05);
+                        drumG.gain.setValueAtTime(0.55, now);
+                        drumG.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+                        drum.connect(drumG); drumG.connect(audioCtx.destination);
+                        drum.start(); drum.stop(now + 0.1);
+                    }
+                    // Sub pulses
+                    if (beat % 4 === 1 || beat % 4 === 3) playNote(50, now, 0.1, 'sine', 0.15, 0.1);
+                    // Shimmer stars
+                    if (beat % 2 === 0) playNote(1000 + Math.sin(beat) * 500, now, 0.5, 'sine', 0.025, 0.4);
+                    // Melody epic
+                    const epicScale = [261.63, 311.13, 392.00, 466.16];
+                    if (beat % 4 === 2) {
+                        playNote(epicScale[beat % 4], now, 0.8, 'triangle', 0.045, 0.7);
+                        playNote(epicScale[beat % 4] * 2, now, 0.8, 'sine', 0.02, 0.7);
+                    }
+                }
+                beat = (beat + 1) % 16;
+            }, 170);
+        }
+
+        function stopBossMusic() {
+            if (_musicInterval) { clearInterval(_musicInterval); _musicInterval = null; }
+            stopBossWind();
+        }
+
+        // ==========================================
+        // NHẠC NỀN CHỜ (INTRO / LOBBY THEME)
+        // — Hùng tráng, huyền bí, thúc giục chiến đấu
+        // ==========================================
+        let _introMusicInterval = null;
+        let _introCtx = null;
+
+        function startIntroMusic() {
+            if (_introMusicInterval) return;
+            _introCtx = new (window.AudioContext || window.webkitAudioContext)();
+            let beat = 0;
+
+            const playN = (freq, time, dur, type, vol, decay) => {
+                const o = _introCtx.createOscillator();
+                const g = _introCtx.createGain();
+                o.type = type;
+                o.frequency.setValueAtTime(freq, time);
+                g.gain.setValueAtTime(vol, time);
+                g.gain.exponentialRampToValueAtTime(0.001, time + decay);
+                o.connect(g); g.connect(_introCtx.destination);
+                o.start(time); o.stop(time + dur);
+            };
+
+            _introMusicInterval = setInterval(() => {
+                if (!_introCtx) return;
+                const now = _introCtx.currentTime;
+
+                // --- LAYER 1: Trống bass hùng tráng (mỗi 2 beat) ---
+                if (beat % 2 === 0) {
+                    const drum = _introCtx.createOscillator();
+                    const dg = _introCtx.createGain();
+                    drum.frequency.setValueAtTime(120, now);
+                    drum.frequency.exponentialRampToValueAtTime(30, now + 0.12);
+                    dg.gain.setValueAtTime(0.55, now);
+                    dg.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+                    drum.connect(dg); dg.connect(_introCtx.destination);
+                    drum.start(); drum.stop(now + 0.18);
+                }
+
+                // --- LAYER 2: Snare nhấn nhịp (beat 1 và 3) ---
+                if (beat % 4 === 2) {
+                    const snare = _introCtx.createOscillator();
+                    const sg = _introCtx.createGain();
+                    snare.type = 'sawtooth';
+                    snare.frequency.setValueAtTime(200, now);
+                    snare.frequency.exponentialRampToValueAtTime(80, now + 0.08);
+                    sg.gain.setValueAtTime(0.2, now);
+                    sg.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+                    snare.connect(sg); sg.connect(_introCtx.destination);
+                    snare.start(); snare.stop(now + 0.1);
+                }
+
+                // --- LAYER 3: Melody chủ đạo — thang âm anh hùng ---
+                // Dm pentatonic: D(293.66) F(349.23) G(392) A(440) C(523.25)
+                const heroMelody = [293.66, 392.00, 440.00, 523.25, 392.00, 349.23, 440.00, 293.66];
+                if (beat % 2 === 0) {
+                    const mFreq = heroMelody[Math.floor(beat / 2) % heroMelody.length];
+                    playN(mFreq, now, 0.38, 'triangle', 0.09, 0.35);
+                    // Octave thấp hơn tạo độ dày
+                    playN(mFreq / 2, now, 0.38, 'sine', 0.06, 0.35);
+                }
+
+                // --- LAYER 4: Bass nền trầm hùng (mỗi 4 beat) ---
+                if (beat % 4 === 0) {
+                    playN(73.42, now, 0.7, 'sine', 0.3, 0.65);  // D2
+                }
+                if (beat % 8 === 4) {
+                    playN(87.31, now, 0.7, 'sine', 0.25, 0.65); // F2
+                }
+
+                // --- LAYER 5: Shimmer hào quang (high freq — cảm giác ma thuật) ---
+                if (beat % 4 === 1) {
+                    playN(1174.66, now, 0.3, 'sine', 0.022, 0.28); // D6
+                    playN(1318.51, now, 0.3, 'sine', 0.018, 0.28); // E6
+                }
+                if (beat % 4 === 3) {
+                    playN(1046.50, now, 0.3, 'sine', 0.02, 0.28);  // C6
+                }
+
+                // --- LAYER 6: Chord pad huyền bí (mỗi 8 beat = 1 chord change) ---
+                if (beat % 8 === 0) {
+                    // Dm chord: D + F + A
+                    playN(146.83, now, 1.2, 'sine', 0.12, 1.1);
+                    playN(174.61, now, 1.2, 'sine', 0.08, 1.1);
+                    playN(220.00, now, 1.2, 'sine', 0.07, 1.1);
+                }
+                if (beat % 8 === 4) {
+                    // Am chord: A + C + E
+                    playN(110.00, now, 1.2, 'sine', 0.1, 1.1);
+                    playN(130.81, now, 1.2, 'sine', 0.08, 1.1);
+                    playN(164.81, now, 1.2, 'sine', 0.07, 1.1);
+                }
+
+                beat = (beat + 1) % 16;
+            }, 160); // 160ms/beat ≈ 125 BPM — nhịp điệu hành quân
+        }
+
+        function stopIntroMusic() {
+            if (_introMusicInterval) { clearInterval(_introMusicInterval); _introMusicInterval = null; }
+            if (_introCtx) { try { _introCtx.close(); } catch(e) {} _introCtx = null; }
+        }
+
+        // ==========================================
+        // PHẦN 2: GAME ENGINE (MÃ NGUỒN CŨ)
+        // ==========================================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const levelUpModal = document.getElementById('level-up-modal');
+        const pauseModal = document.getElementById('pause-modal');
+        const victoryModal = document.getElementById('victory-modal');
+        const introModal = document.getElementById('intro-modal');
+        const skillOptions = document.getElementById('skill-options');
+        const pickupNotice = document.getElementById('pickup-notice');
+
+        let width, height;
+        let isPaused = true; 
+        let isLevelingUp = false;
+        let killCount = 0;
+        let mouseX = 0, mouseY = 0;
+        let screenMouseX = 0, screenMouseY = 0;
+        let spawnCount = 0; 
+        let lockedTarget = null; 
+
+        const camera = { x: 0, y: 0 };
+        const MIN_COOLDOWN = 150;
+
+        const STAGES = [
+            { id: 1, name: "Stage 1: Đồng Cỏ", reqKills: 30, bossHp: 1500, bossDamageMult: 1.2, bossColor: "#ef4444", bossName: "TRÙM ĐỒNG CỎ" },
+            { id: 2, name: "Stage 2: Sa Mạc", reqKills: 80, bossHp: 4500, bossDamageMult: 1.5, bossColor: "#eab308", bossName: "THỦ LĨNH CÁT" },
+            { id: 3, name: "Stage 3: Hư Không", reqKills: 150, bossHp: 12000, bossDamageMult: 2.0, bossColor: "#a855f7", bossName: "CHÚA TỂ HƯ KHÔNG" }
+        ];
+        let currentStageIdx = 0;
+        let stageKills = 0;
+        let isBossSpawned = false;
+        let activeBoss = null;
+        let lastHordeSpawn = 0; 
+
+        const GEM_TYPES = {
+            NORMAL: { color: '#a855f7', multiplier: 1, shadow: '#a855f7' },      
+            RARE: { color: '#3b82f6', multiplier: 2, shadow: '#3b82f6' },        
+            LEGENDARY: { color: '#ffffff', multiplier: 5, shadow: '#cbd5e1' }    
+        };
+
+        const METEOR_CONFIG = {
+            1: { count: 3, damage: 80, radius: 80, hasScorch: false },
+            2: { count: 5, damage: 100, radius: 90, hasScorch: false },
+            3: { count: 5, damage: 125, radius: 100, hasScorch: true, scorchLife: 300 }
+        };
+
+        const FIREBALL_CONFIG = {
+            1: { radius: 8, damage: 40, burnRadius: 0, burnDamage: 0 },
+            2: { radius: 16, damage: 55, burnRadius: 0, burnDamage: 0 },
+            3: { radius: 16, damage: 70, burnRadius: 45, burnDamage: 0.6 },
+            4: { radius: 18, damage: 88, burnRadius: 45, burnDamage: 0.75 }, 
+            5: { radius: 20, damage: 88, burnRadius: 70, burnDamage: 0.75 } 
+        };
+
+        const player = {
+            x: 0, y: 0,
+            radius: 18,
+            speed: 3.5,
+            hp: 125, maxHp: 125, 
+            mana: 100, maxMana: 100,
+            manaRegen: 0.15,
+            level: 1, xp: 0, maxXp: 100,
+            autoSpells: {
+                normal: { lastCast: 0, cooldown: 500, mode: 'single' },
+                orbit: { level: 0, count: 0, angle: 0, radius: 70, damage: 1.5, rotationSpeed: 0.04 }
+            },
+            fireballData: { level: 1 },
+            guardianData: { level: 1, active: false, endTime: 0, auraAngle: 0, range: 200, duration: 5000 },
+            teleportData: { level: 1, distance: 150 },
+            meteorData: { level: 1 }, 
+            activeSkills: [
+                { id: 'fireball', name: 'Cầu Lửa', key: 'KeyQ', cd: 1200, lastUsed: 0, cost: 20 },
+                { id: 'guardian', name: 'Hộ Pháp', key: 'KeyE', cd: 6000, lastUsed: 0, cost: 40 },
+                { id: 'teleport', name: 'Teleport', key: 'ShiftLeft', cd: 4000, lastUsed: 0, cost: 25 },
+                { id: 'meteor', name: 'Mưa Thiên Thạch', key: 'KeyR', cd: 10000, lastUsed: 0, cost: 60 }
+            ]
+        };
+
+        let enemies = [];
+        let projectiles = [];
+        let enemyProjectiles = []; 
+        let zones = [];
+        let xpGems = [];
+        let chests = []; 
+        let particles = [];
+        const keys = {};
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            if (player.x === 0) { player.x = width / 2; player.y = height / 2; }
+        }
+
+        window.addEventListener('resize', resize);
+        window.addEventListener('mousemove', e => {
+            screenMouseX = e.clientX;
+            screenMouseY = e.clientY;
+            mouseX = screenMouseX + camera.x;
+            mouseY = screenMouseY + camera.y;
+        });
+
+        window.addEventListener('mousedown', e => {
+            if (isPaused || isLevelingUp) return;
+            const clickWorldX = e.clientX + camera.x;
+            const clickWorldY = e.clientY + camera.y;
+            let clickedEnemy = null;
+            let closestDist = 120; 
+            enemies.forEach(en => {
+                const dist = Math.hypot(en.x - clickWorldX, en.y - clickWorldY);
+                if (dist < en.radius + 30 && dist < closestDist) {
+                    closestDist = dist;
+                    clickedEnemy = en;
+                }
+            });
+            if (clickedEnemy) lockedTarget = clickedEnemy;
+            else lockedTarget = null;
+        });
+        
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if (e.code === 'Escape' || e.code === 'KeyP') {
+                if (introModal.style.display === 'block') return;
+                togglePause();
+            }
+            if (!isPaused && !isLevelingUp) handleActiveSkill(e.code);
+        });
+        
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        document.getElementById('start-game-btn').onclick = () => {
+            stopIntroMusic();           // Dừng nhạc chờ
+            initAudio();                // Kích hoạt Audio Engine game
+            introModal.style.display = 'none';
+            isPaused = false;
+        };
+        // Phát nhạc chờ ngay khi người dùng tương tác lần đầu (browser yêu cầu gesture)
+        (function() {
+            let introStarted = false;
+            function tryStartIntro() {
+                if (!introStarted) {
+                    introStarted = true;
+                    startIntroMusic();
+                }
+                document.removeEventListener('mousemove', tryStartIntro);
+                document.removeEventListener('keydown', tryStartIntro);
+                document.removeEventListener('click', tryStartIntro);
+            }
+            document.addEventListener('mousemove', tryStartIntro);
+            document.addEventListener('keydown', tryStartIntro);
+            document.addEventListener('click', tryStartIntro);
+        })();
+
+        document.getElementById('resume-btn').onclick = () => { playSoundEffect('ui'); togglePause(); };
+        document.getElementById('exit-btn').onclick = () => location.reload();
+        document.getElementById('restart-btn').onclick = () => location.reload();
+        document.getElementById('next-stage-btn').onclick = () => { playSoundEffect('ui'); startNextStage(); };
+
+        function togglePause() {
+            if (isLevelingUp || player.hp <= 0 || victoryModal.style.display === 'block') return;
+            isPaused = !isPaused;
+            pauseModal.style.display = isPaused ? 'block' : 'none';
+        }
+
+        function handleActiveSkill(keyCode) {
+            const adjustedCode = keyCode === 'ShiftRight' ? 'ShiftLeft' : keyCode;
+            const skillIdx = player.activeSkills.findIndex(s => s.key === adjustedCode);
+            if (skillIdx === -1) return;
+            const skill = player.activeSkills[skillIdx];
+            const now = Date.now();
+            if (now - skill.lastUsed >= skill.cd && player.mana >= skill.cost) {
+                if (skill.id === 'meteor' && enemies.length === 0) return;
+                const success = useSkill(skill.id);
+                if (success !== false) {
+                    skill.lastUsed = now;
+                    player.mana -= skill.cost;
+                }
+            }
+        }
+
+        function spawnMeteor() {
+            const config = METEOR_CONFIG[player.meteorData.level];
+            let targets;
+            if (lockedTarget && enemies.includes(lockedTarget)) {
+                const randomOthers = enemies.filter(e => e !== lockedTarget).sort(() => 0.5 - Math.random()).slice(0, config.count - 1);
+                targets = [lockedTarget, ...randomOthers];
+            } else {
+                targets = [...enemies].sort(() => 0.5 - Math.random()).slice(0, config.count);
+            }
+            if (targets.length === 0) return false; 
+            targets.forEach(t => {
+                projectiles.push({
+                    type: 'meteor',
+                    x: t.x + (Math.random() * 60 - 30), 
+                    y: t.y - 800, 
+                    targetX: t.x, targetY: t.y,
+                    vx: 0, vy: 18, 
+                    radius: 22, damage: config.damage,
+                    color: '#ef4444', level: player.meteorData.level
+                });
+            });
+            return true;
+        }
+
+        function useSkill(id) {
+            if (id === 'fireball') {
+                let tx = mouseX, ty = mouseY;
+                if (lockedTarget && enemies.includes(lockedTarget)) { tx = lockedTarget.x; ty = lockedTarget.y; }
+                const angle = Math.atan2(ty - player.y, tx - player.x);
+                createFireball(player.x, player.y, angle);
+                playSoundEffect('fireball'); // ÂM THANH KỸ NĂNG Q
+            } else if (id === 'guardian') {
+                const g = player.guardianData;
+                const range = g.level >= 3 ? g.range + 80 : g.range;
+                particles.push({ type: 'shockwave', x: player.x, y: player.y, radius: 10, maxRadius: range, life: 25, color: '#60a5fa' });
+                enemies.forEach(e => {
+                    if (Math.hypot(e.x - player.x, e.y - player.y) < range) {
+                        const a = Math.atan2(e.y - player.y, e.x - player.x);
+                        const knockback = (e.type === 'boss' || e.type === 'miniboss') ? 20 : 120;
+                        e.x += Math.cos(a) * knockback; e.y += Math.sin(a) * knockback;
+                        e.hp -= (10 + player.level * 2);
+                    }
+                });
+                if (g.level >= 2) {
+                    g.active = true;
+                    const bonusTime = g.level >= 3 ? 1000 : 0;
+                    g.endTime = Date.now() + g.duration + bonusTime;
+                }
+                playSoundEffect('shield'); // ÂM THANH KỸ NĂNG E
+            } else if (id === 'teleport') {
+                const t = player.teleportData;
+                particles.push({ type: 'blink_trail', x: player.x, y: player.y, life: 10 });
+                const angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+                player.x += Math.cos(angle) * t.distance;
+                player.y += Math.sin(angle) * t.distance;
+                particles.push({ type: 'blink_trail', x: player.x, y: player.y, life: 10 });
+                playSoundEffect('teleport'); // ÂM THANH KỸ NĂNG SHIFT
+            } else if (id === 'meteor') {
+                return spawnMeteor();
+            }
+        }
+
+        function createFireball(x, y, angle) {
+            const lvl = player.fireballData.level;
+            const config = FIREBALL_CONFIG[lvl];
+            projectiles.push({
+                type: 'fireball', x, y,
+                vx: Math.cos(angle) * 7, vy: Math.sin(angle) * 7,
+                radius: config.radius, color: '#f97316',
+                damage: config.damage, lvl
+            });
+        }
+
+        function createNormalSpell(x, y, angle) {
+            const mode = player.autoSpells.normal.mode;
+            const shoot = (a) => {
+                projectiles.push({
+                    type: 'normal', x, y,
+                    vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
+                    radius: 5, color: '#fbbf24', damage: 10 + player.level * 2
+                });
+            };
+            if (mode === 'single') shoot(angle);
+            else if (mode === 'double') { shoot(angle - 0.08); shoot(angle + 0.08); }
+            else if (mode === 'cone') { shoot(angle - 0.25); shoot(angle); shoot(angle + 0.25); }
+            // Âm thanh đòn đánh thường — throttle 40%
+            if (Math.random() < 0.4) playSoundEffect('hit');
+        }
+
+        function dropExpGem(x, y, isBig) {
+            const rand = Math.random() * 100;
+            let type;
+            if (isBig) {
+                if (rand < 40) type = GEM_TYPES.RARE;
+                else type = GEM_TYPES.LEGENDARY;
+                if (Math.random() < 0.25) dropChest(x, y);
+            } else {
+                if (rand < 70) type = GEM_TYPES.NORMAL;
+                else if (rand < 95) type = GEM_TYPES.RARE;
+                else type = GEM_TYPES.LEGENDARY;
+                if (Math.random() < 0.01) dropChest(x, y);
+            }
+            const baseExp = isBig ? 200 : 25;
+            xpGems.push({ x, y, val: baseExp * type.multiplier, color: type.color, shadow: type.shadow, radius: type.multiplier === 5 ? 5 : (type.multiplier === 2 ? 4 : 3) });
+        }
+
+        function dropChest(x, y) {
+            chests.push({ x: x, y: y, radius: 12, color: '#eab308', shadow: '#fbbf24', pulse: 0 });
+        }
+
+        function spawnSingleEnemy(type = 'normal', fixedX = null, fixedY = null) {
+            let x, y;
+            if (fixedX !== null && fixedY !== null) { x = fixedX; y = fixedY; } else {
+                const side = Math.floor(Math.random() * 4);
+                const buffer = 100;
+                if (side === 0) { x = player.x + Math.random() * width - width/2; y = player.y - height/2 - buffer; }
+                else if (side === 1) { x = player.x + width/2 + buffer; y = player.y + Math.random() * height - height/2; }
+                else if (side === 2) { x = player.x + Math.random() * width - width/2; y = player.y + height/2 + buffer; }
+                else { x = player.x - width/2 - buffer; y = player.y + Math.random() * height - height/2; }
+            }
+            let hp = 20 + player.level * 8;
+            let radius = 14;
+            let speed = 1.2 + Math.random() * 0.8;
+            let color = '#ef4444';
+            if (type === 'miniboss') { hp *= 15; radius = 35; speed = 1.5; color = '#f97316'; } 
+            else if (type === 'elite') { hp *= 5; radius = 25; speed = 0.8; color = '#7e22ce'; }
+            enemies.push({ x, y, hp: hp, maxHp: hp, speed: speed, radius: radius, type: type, lastShot: 0, color: color });
+        }
+
+        function spawnHorde() {
+            const count = 8 + Math.floor(Math.random() * 5); 
+            const dist = 500; 
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                const sx = player.x + Math.cos(angle) * dist;
+                const sy = player.y + Math.sin(angle) * dist;
+                spawnSingleEnemy('normal', sx, sy);
+            }
+            lastHordeSpawn = Date.now();
+        }
+
+        function spawnEnemyManager() {
+            if (isPaused || isLevelingUp) return;
+            if (isBossSpawned && enemies.length > 20) return;
+            if (enemies.length > 100) return;
+            const now = Date.now();
+            if (currentStageIdx === 1 && !isBossSpawned) { if (now - lastHordeSpawn > 4500) spawnHorde(); }
+            spawnCount++;
+            let type = 'normal';
+            if (currentStageIdx === 0) {
+                if (spawnCount % 35 === 0) type = 'miniboss';
+                else if (spawnCount % 10 === 0) type = 'elite';
+            } else if (currentStageIdx === 1) {
+                if (spawnCount % 40 === 0) type = 'miniboss';
+                else if (spawnCount % 20 === 0) type = 'elite'; 
+            } else if (currentStageIdx === 2) {
+                if (spawnCount % 25 === 0) type = 'miniboss';
+                else type = 'elite';
+            }
+            spawnSingleEnemy(type);
+        }
+
+        function spawnBoss() {
+            if (isBossSpawned) return;
+            isBossSpawned = true;
+            const stage = STAGES[currentStageIdx];
+            activeBoss = {
+                x: player.x, y: player.y - 400, hp: stage.bossHp, maxHp: stage.bossHp,
+                speed: 1.0, radius: 55, type: 'boss', color: stage.bossColor,
+                lastShot: 0, name: stage.bossName, damageMult: stage.bossDamageMult
+            };
+            enemies.push(activeBoss);
+            document.getElementById('boss-ui').style.display = 'block';
+            document.getElementById('boss-name').innerText = stage.bossName;
+            lockedTarget = activeBoss;
+            // Cảnh báo âm thanh + phát nhạc boss theo stage
+            playSoundEffect('boss_warning');
+            const themes = ['FIELD_BOSS', 'DESERT_BOSS', 'VOID_BOSS'];
+            startBossMusic(themes[currentStageIdx] || 'FIELD_BOSS');
+        }
+
+        function startNextStage() {
+            currentStageIdx++;
+            if (currentStageIdx >= STAGES.length) { location.reload(); return; }
+            stageKills = 0; spawnCount = 0; isBossSpawned = false; activeBoss = null;
+            enemies = []; victoryModal.style.display = 'none'; document.getElementById('boss-ui').style.display = 'none';
+            lastHordeSpawn = Date.now(); isPaused = false; updateStageUI();
+            lockedTarget = null;
+            stopBossMusic(); // Dừng nhạc boss khi sang màn mới
+        }
+
+        function updateStageUI() {
+            const stage = STAGES[currentStageIdx];
+            document.getElementById('stage-name').innerText = stage.name;
+            const progress = isBossSpawned ? 100 : Math.min(100, Math.floor((stageKills / stage.reqKills) * 100));
+            document.getElementById('stage-progress').innerText = `Tiến trình: ${progress}%`;
+        }
+
+        function update() {
+            if (isPaused || isLevelingUp) return;
+
+            camera.x = player.x - width / 2;
+            camera.y = player.y - height / 2;
+
+            mouseX = screenMouseX + camera.x;
+            mouseY = screenMouseY + camera.y;
+
+            let moveX = 0, moveY = 0;
+            if (keys['KeyW']) moveY -= 1; if (keys['KeyS']) moveY += 1;
+            if (keys['KeyA']) moveX -= 1; if (keys['KeyD']) moveX += 1;
+            if (moveX !== 0 || moveY !== 0) {
+                const mag = Math.hypot(moveX, moveY);
+                player.x += (moveX / mag) * player.speed;
+                player.y += (moveY / mag) * player.speed;
+            }
+            if (player.mana < player.maxMana) player.mana += player.manaRegen;
+
+            if (player.guardianData.active) {
+                if (Date.now() > player.guardianData.endTime) { player.guardianData.active = false; } 
+                else {
+                    player.guardianData.auraAngle += 0.05;
+                    enemies.forEach(e => {
+                        if (Math.hypot(e.x - player.x, e.y - player.y) < 80) {
+                            const a = Math.atan2(e.y - player.y, e.x - player.x);
+                            const resistance = (e.type === 'boss' || e.type === 'miniboss') ? 0.4 : 3;
+                            e.x += Math.cos(a) * resistance; e.y += Math.sin(a) * resistance;
+                            e.hp -= 0.2;
+                            // Thêm âm thanh chạm khi shield đang bật
+                            if (Math.random() < 0.05) playSoundEffect('guardian_hit');
+                        }
+                    });
+                }
+            }
+
+            castAutoSpells();
+            updateCooldownUI();
+
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                p.x += p.vx; p.y += p.vy;
+                if (p.type === 'meteor' && p.y >= p.targetY) {
+                    const config = METEOR_CONFIG[p.level];
+                    zones.push({ x: p.x, y: p.y, radius: config.radius, damage: 5, life: 15, color: 'rgba(239, 68, 68, 0.4)' });
+                    if (config.hasScorch) zones.push({ x: p.x, y: p.y, radius: config.radius * 0.8, damage: 1.5, life: config.scorchLife, color: 'rgba(127, 29, 29, 0.6)' });
+                    enemies.forEach(e => { if (Math.hypot(e.x - p.x, e.y - p.y) < config.radius + e.radius) e.hp -= p.damage; });
+                    playSoundEffect('meteor_impact'); // ÂM THANH THIÊN THẠCH CHẠM ĐẤT
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+                if (Math.hypot(player.x - p.x, player.y - p.y) > 1500) projectiles.splice(i, 1);
+            }
+
+            enemyProjectiles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy;
+                if (Math.hypot(player.x - p.x, player.y - p.y) < player.radius + p.radius) {
+                    player.hp -= player.guardianData.active ? 4 : 12; 
+                    enemyProjectiles.splice(i, 1);
+                    playSoundEffect('guardian_hit'); // Âm thanh trúng đòn
+                }
+                if (Math.hypot(player.x - p.x, player.y - p.y) > 1500) enemyProjectiles.splice(i, 1);
+            });
+
+            zones.forEach((z, zi) => {
+                enemies.forEach(e => { if (Math.hypot(e.x - z.x, e.y - z.y) < z.radius + e.radius) e.hp -= z.damage; });
+                z.life--; if (z.life <= 0) zones.splice(zi, 1);
+            });
+
+            enemies.forEach((e, ei) => {
+                const angle = Math.atan2(player.y - e.y, player.x - e.x);
+                e.x += Math.cos(angle) * e.speed; e.y += Math.sin(angle) * e.speed;
+                if (e.type === 'boss') {
+                    if (Date.now() - e.lastShot > 2500) {
+                        for (let i = 0; i < 12; i++) {
+                            const sa = (i / 12) * Math.PI * 2;
+                            enemyProjectiles.push({ x: e.x, y: e.y, vx: Math.cos(sa)*4.5, vy: Math.sin(sa)*4.5, radius: 10, color: '#f87171' });
+                        }
+                        e.lastShot = Date.now();
+                    }
+                    const bossHpPct = (e.hp / e.maxHp) * 100;
+                    document.getElementById('boss-hp-fill').style.width = `${bossHpPct}%`;
+                    document.getElementById('boss-hp-text').innerText = `${Math.ceil(bossHpPct)}%`;
+                } else if (e.type === 'miniboss' && Date.now() - e.lastShot > 1800) {
+                    const sa = Math.atan2(player.y - e.y, player.x - e.x);
+                    for(let i = -1; i <= 1; i++) { enemyProjectiles.push({ x: e.x, y: e.y, vx: Math.cos(sa + i*0.2)*5, vy: Math.sin(sa + i*0.2)*5, radius: 8, color: '#f97316' }); }
+                    e.lastShot = Date.now();
+                } else if (e.type === 'elite' && Date.now() - e.lastShot > 3000) {
+                    const sa = Math.atan2(player.y - e.y, player.x - e.x);
+                    enemyProjectiles.push({ x: e.x, y: e.y, vx: Math.cos(sa)*4, vy: Math.sin(sa)*4, radius: 6, color: '#fbbf24' });
+                    e.lastShot = Date.now();
+                }
+
+                if (Math.hypot(player.x - e.x, player.y - e.y) < player.radius + e.radius) {
+                    const baseDmg = (e.type === 'boss') ? 0.4 * e.damageMult : (e.type === 'miniboss' ? 0.8 : 0.4);
+                    player.hp -= player.guardianData.active ? baseDmg * 0.4 : baseDmg;
+                }
+
+                projectiles.forEach((p, pi) => {
+                    if (p.type !== 'meteor' && Math.hypot(e.x - p.x, e.y - p.y) < e.radius + p.radius) {
+                        e.hp -= p.damage;
+                        const config = FIREBALL_CONFIG[p.lvl || 1];
+                        if (p.type === 'fireball' && config.burnRadius > 0) {
+                            zones.push({ x: p.x, y: p.y, radius: config.burnRadius, damage: config.burnDamage, life: 120, color: 'rgba(249, 115, 22, 0.3)' });
+                        }
+                        projectiles.splice(pi, 1);
+                    }
+                });
+
+                if (player.autoSpells.orbit.count > 0) {
+                    const orb = player.autoSpells.orbit;
+                    for (let n = 0; n < orb.count; n++) {
+                        const ox = player.x + Math.cos(orb.angle + n * Math.PI*2/orb.count) * orb.radius;
+                        const oy = player.y + Math.sin(orb.angle + n * Math.PI*2/orb.count) * orb.radius;
+                        if (Math.hypot(e.x - ox, e.y - oy) < e.radius + 10) e.hp -= orb.damage;
+                    }
+                }
+
+                if (e.hp <= 0) {
+                    if (e.type === 'boss') { isPaused = true; victoryModal.style.display = 'block'; playSoundEffect('upgrade'); stopBossMusic(); } else {
+                        stageKills++; updateStageUI();
+                        if (!isBossSpawned && stageKills >= STAGES[currentStageIdx].reqKills) spawnBoss();
+                        dropExpGem(e.x, e.y, e.type === 'miniboss' || e.type === 'elite');
+                        if (e === lockedTarget) lockedTarget = null;
+                        enemies.splice(ei, 1); killCount++;
+                    }
+                }
+            });
+
+            if (player.hp <= 0) { isPaused = true; document.getElementById('game-over').classList.remove('hidden'); document.getElementById('final-stats').innerText = `Cấp độ: ${player.level} | Hạ gục: ${killCount}`; }
+
+            xpGems.forEach((g, i) => {
+                const d = Math.hypot(player.x - g.x, player.y - g.y);
+                if (d < 150) { const a = Math.atan2(player.y - g.y, player.x - g.x); g.x += Math.cos(a) * 7; g.y += Math.sin(a) * 7; }
+                if (d < player.radius + 10) {
+                    player.xp += g.val; xpGems.splice(i, 1);
+                    if (player.xp >= player.maxXp) { 
+                        player.xp -= player.maxXp; player.level++; player.maxXp *= 1.2; player.hp = Math.min(player.maxHp, player.hp + 20); 
+                        showLevelUp(); 
+                        playSoundEffect('upgrade'); // ÂM THANH LÊN CẤP
+                    }
+                }
+            });
+
+            chests.forEach((c, i) => {
+                c.pulse += 0.05;
+                const d = Math.hypot(player.x - c.x, player.y - c.y);
+                if (d < 120) { const a = Math.atan2(player.y - c.y, player.x - c.x); c.x += Math.cos(a) * 5; c.y += Math.sin(a) * 5; }
+                if (d < player.radius + 10) {
+                    player.maxHp += 10; player.hp = Math.min(player.maxHp, player.hp + 25);
+                    chests.splice(i, 1);
+                    pickupNotice.style.display = 'block'; setTimeout(() => pickupNotice.style.display = 'none', 1500);
+                    for(let j=0; j<15; j++) particles.push({ type: 'shockwave', x: player.x, y: player.y, radius: 5, maxRadius: 50, life: 20, color: '#facc15' });
+                    playSoundEffect('upgrade');
+                }
+            });
+
+            const hpPercentage = Math.max(0, Math.floor((player.hp / player.maxHp) * 100));
+            const manaPct = Math.max(0, Math.floor((player.mana / player.maxMana) * 100));
+            document.getElementById('hp-fill').style.width = `${hpPercentage}%`; 
+            document.getElementById('hp-current-text').innerText = Math.ceil(player.hp);
+            document.getElementById('hp-max-text').innerText = player.maxHp;
+            document.getElementById('mana-fill').style.width = `${manaPct}%`; 
+            document.getElementById('mp-current-text').innerText = Math.ceil(player.mana);
+            document.getElementById('mp-max-text').innerText = player.maxMana;
+            const xpPercentage = Math.floor((player.xp / player.maxXp) * 100);
+            document.getElementById('xp-fill').style.width = `${xpPercentage}%`;
+            document.getElementById('xp-pct-label').innerText = `${xpPercentage}%`;
+            document.getElementById('level-val').innerText = player.level; 
+            document.getElementById('kill-count').innerText = killCount;
+        }
+
+        function castAutoSpells() {
+            const now = Date.now();
+            if (now - player.autoSpells.normal.lastCast > player.autoSpells.normal.cooldown) {
+                let tx = mouseX, ty = mouseY;
+                if (lockedTarget && enemies.includes(lockedTarget)) { tx = lockedTarget.x; ty = lockedTarget.y; }
+                createNormalSpell(player.x, player.y, Math.atan2(ty - player.y, tx - player.x));
+                player.autoSpells.normal.lastCast = now;
+            }
+            if (player.autoSpells.orbit.count > 0) player.autoSpells.orbit.angle += player.autoSpells.orbit.rotationSpeed;
+        }
+
+        function updateCooldownUI() {
+            const now = Date.now();
+            player.activeSkills.forEach((s, i) => {
+                const elapsed = now - s.lastUsed;
+                const progress = Math.min(100, (elapsed / s.cd) * 100);
+                document.getElementById(`cd-${i+1}`).style.height = `${100 - progress}%`;
+                document.getElementById(`slot-${i+1}`).style.opacity = (progress < 100 || player.mana < s.cost) ? "0.5" : "1";
+            });
+        }
+
+        function showLevelUp() {
+            isLevelingUp = true; levelUpModal.style.display = 'block'; skillOptions.innerHTML = '';
+            const orb = player.autoSpells.orbit;
+            const options = [{ id: 'mana', name: 'Đại Pháp Sư', desc: 'Hồi Mana +30%' }];
+            if (player.autoSpells.normal.mode === 'single') options.push({ id: 'normal_double', name: 'Song Pháo', desc: 'Đòn đánh thường bắn 2 tia' });
+            else if (player.autoSpells.normal.mode === 'double') options.push({ id: 'normal_cone', name: 'Vũ Điệu Ánh Sáng', desc: 'Đòn đánh thường bắn 3 tia' });
+            if (player.autoSpells.normal.cooldown > MIN_COOLDOWN) options.push({ id: 'normal_speed', name: 'Liên Hoàn Tiễn', desc: 'Tốc độ đánh thường +25%' });
+            if (orb.level < 4) options.push({ id: 'orbit', name: `Vòng Tròn LV${orb.level+1}`, desc: `Thêm 1 quả cầu xoay quanh` });
+            if (player.fireballData.level < 5) options.push({ id: 'fire_up', name: `Cầu Lửa LV${player.fireballData.level+1}`, desc: "Tăng hỏa lực" });
+            if (player.guardianData.level < 2) options.push({ id: 'guard_2', name: 'Hộ Pháp LV2', desc: 'Tạo hào quang bảo vệ' });
+            else if (player.guardianData.level < 3) options.push({ id: 'guard_3', name: 'Hộ Pháp LV3', desc: 'Tăng phạm vi hào quang' });
+            if (player.meteorData.level < 3) options.push({ id: 'meteor_up', name: `Mưa Thiên Thạch LV${player.meteorData.level+1}`, desc: "Tăng số thiên thạch" });
+            
+            options.sort(() => 0.5 - Math.random()).slice(0, 3).forEach(o => {
+                const b = document.createElement('button'); b.className = 'skill-btn';
+                b.innerHTML = `<strong>${o.name}</strong><br><small class="text-slate-400">${o.desc}</small>`;
+                b.onclick = () => {
+                    playSoundEffect('ui'); // Âm thanh chọn skill
+                    if (o.id === 'normal_double') player.autoSpells.normal.mode = 'double';
+                    if (o.id === 'normal_cone') player.autoSpells.normal.mode = 'cone';
+                    if (o.id === 'normal_speed') player.autoSpells.normal.cooldown = Math.max(MIN_COOLDOWN, player.autoSpells.normal.cooldown * 0.75);
+                    if (o.id === 'orbit') { orb.level++; orb.count++; }
+                    if (o.id === 'fire_up') player.fireballData.level++;
+                    if (o.id === 'guard_2') { player.guardianData.level = 2; document.getElementById('icon-2').innerText = '🔯'; }
+                    if (o.id === 'guard_3') player.guardianData.level = 3;
+                    if (o.id === 'meteor_up') player.meteorData.level++; 
+                    if (o.id === 'mana') player.manaRegen *= 1.3;
+                    levelUpModal.style.display = 'none'; isLevelingUp = false;
+                };
+                skillOptions.appendChild(b);
+            });
+        }
+
+        function drawPolygon(x, y, radius, sides, angle, color) {
+            ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 3;
+            for (let i = 0; i < sides; i++) {
+                const px = (x - camera.x) + radius * Math.cos(angle + (i * 2 * Math.PI) / sides);
+                const py = (y - camera.y) + radius * Math.sin(angle + (i * 2 * Math.PI) / sides);
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.closePath(); ctx.stroke(); ctx.fillStyle = color.replace('1)', '0.1)'); ctx.fill();
+        }
+
+        function drawMobHealthBar(e) {
+            if (e.hp <= 0 || e.type === 'boss') return;
+            const barWidth = e.radius * 2 + 10;
+            const barHeight = 4;
+            const x = e.x - camera.x - barWidth / 2;
+            const y = e.y - camera.y - e.radius - 12;
+            ctx.fillStyle = 'rgba(30, 41, 59, 0.8)'; ctx.fillRect(x, y, barWidth, barHeight);
+            const hpPct = Math.max(0, e.hp / e.maxHp);
+            if (e.type === 'miniboss') ctx.fillStyle = '#f97316';
+            else if (e.type === 'elite') ctx.fillStyle = '#a855f7';
+            else ctx.fillStyle = '#ef4444';
+            ctx.fillRect(x, y, barWidth * hpPct, barHeight);
+            ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 0.5; ctx.strokeRect(x, y, barWidth, barHeight);
+        }
+
+        function draw() {
+            ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, width, height);
+            ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+            const gridSize = 100;
+            const startGridX = -camera.x % gridSize;
+            const startGridY = -camera.y % gridSize;
+            for(let x = startGridX; x < width; x += gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
+            for(let y = startGridY; y < height; y += gridSize) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
+            
+            zones.forEach(z => { ctx.fillStyle = z.color; ctx.beginPath(); ctx.arc(z.x - camera.x, z.y - camera.y, z.radius, 0, Math.PI*2); ctx.fill(); });
+            xpGems.forEach(g => { ctx.fillStyle = g.color; ctx.shadowBlur = 8; ctx.shadowColor = g.shadow; ctx.beginPath(); ctx.arc(g.x - camera.x, g.y - camera.y, g.radius, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; });
+            
+            chests.forEach(c => {
+                const bounce = Math.sin(c.pulse) * 5;
+                ctx.shadowBlur = 15; ctx.shadowColor = c.shadow;
+                ctx.fillStyle = '#92400e'; ctx.fillRect(c.x - camera.x - 12, c.y - camera.y - 8 + bounce, 24, 16);
+                ctx.fillStyle = c.color; ctx.fillRect(c.x - camera.x - 12, c.y - camera.y - 12 + bounce, 24, 6);
+                ctx.fillStyle = '#fbbf24'; ctx.fillRect(c.x - camera.x - 2, c.y - camera.y - 8 + bounce, 4, 6);
+                ctx.font = "14px Arial"; ctx.fillText("❤️", c.x - camera.x - 7, c.y - camera.y - 20 + bounce);
+                ctx.shadowBlur = 0;
+            });
+
+            if (lockedTarget && enemies.includes(lockedTarget)) { 
+                ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 3; ctx.setLineDash([5, 5]); ctx.beginPath(); 
+                ctx.arc(lockedTarget.x - camera.x, lockedTarget.y - camera.y, lockedTarget.radius + 12, 0, Math.PI * 2); 
+                ctx.stroke(); ctx.setLineDash([]); 
+            }
+
+            enemies.forEach(e => {
+                ctx.fillStyle = e.color; 
+                if (e.type === 'boss') { ctx.shadowBlur = 20; ctx.shadowColor = e.color; ctx.beginPath(); ctx.arc(e.x - camera.x, e.y - camera.y, e.radius, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; } 
+                else if (e.type === 'miniboss') { ctx.shadowBlur = 12; ctx.shadowColor = '#f97316'; ctx.beginPath(); ctx.arc(e.x - camera.x, e.y - camera.y, e.radius, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; } 
+                else if (e.type === 'elite') { ctx.shadowBlur = 8; ctx.shadowColor = '#7e22ce'; ctx.beginPath(); ctx.arc(e.x - camera.x, e.y - camera.y, e.radius, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; } 
+                else { ctx.beginPath(); ctx.arc(e.x - camera.x, e.y - camera.y, e.radius, 0, Math.PI*2); ctx.fill(); }
+                drawMobHealthBar(e);
+            });
+
+            enemyProjectiles.forEach(p => { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x - camera.x, p.y - camera.y, p.radius, 0, Math.PI*2); ctx.fill(); });
+            projectiles.forEach(p => {
+                ctx.fillStyle = p.color; ctx.shadowBlur = p.radius > 10 ? 15 : 5; ctx.shadowColor = p.color;
+                ctx.beginPath(); ctx.arc(p.x - camera.x, p.y - camera.y, p.radius, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+            });
+
+            if (player.autoSpells.orbit.count > 0) {
+                const orb = player.autoSpells.orbit;
+                for (let n = 0; n < orb.count; n++) {
+                    const ox = player.x + Math.cos(orb.angle + n * Math.PI*2/orb.count) * orb.radius;
+                    const oy = player.y + Math.sin(orb.angle + n * Math.PI*2/orb.count) * orb.radius;
+                    ctx.fillStyle = '#22d3ee'; ctx.beginPath(); ctx.arc(ox - camera.x, oy - camera.y, 8, 0, Math.PI*2); ctx.fill();
+                }
+            }
+
+            if (player.guardianData.active) { ctx.shadowBlur = 10; ctx.shadowColor = '#60a5fa'; drawPolygon(player.x, player.y, 75, 6, player.guardianData.auraAngle, 'rgba(191, 219, 254, 1)'); drawPolygon(player.x, player.y, 82, 6, -player.guardianData.auraAngle * 0.5, 'rgba(147, 197, 253, 0.5)'); ctx.shadowBlur = 0; }
+            
+            particles.forEach((p, i) => {
+                if (p.type === 'shockwave') { ctx.strokeStyle = p.color || `rgba(255, 255, 255, ${p.life/25})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x - camera.x, p.y - camera.y, p.radius, 0, Math.PI*2); ctx.stroke(); p.radius += (p.maxRadius - p.radius) * 0.15; } 
+                else if (p.type === 'blink_trail') { ctx.fillStyle = `rgba(168, 85, 247, ${p.life/10})`; ctx.beginPath(); ctx.arc(p.x - camera.x, p.y - camera.y, player.radius, 0, Math.PI*2); ctx.fill(); }
+                if (!isPaused && !isLevelingUp) p.life--; if (p.life <= 0) particles.splice(i, 1);
+            });
+
+            ctx.fillStyle = '#a855f7'; ctx.shadowBlur = 15; ctx.shadowColor = '#a855f7'; ctx.beginPath(); ctx.arc(player.x - camera.x, player.y - camera.y, player.radius, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+            
+            requestAnimationFrame(() => { update(); draw(); });
+        }
+        resize();
+        setInterval(spawnEnemyManager, 1000); 
+        updateStageUI();
+        draw();
+    </script>
+</body>
+</html>
